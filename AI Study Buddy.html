@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI Study Buddy</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f6f7fb;--card:#fff;--text:#1d2433;--muted:#667085;--line:#e3e6ee;--brand:#5b4bdb;--brand-t:#fff;--me:#5b4bdb;--me-t:#fff;--bot:#eef0f8}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12141c;--card:#1b1e29;--text:#e8eaf2;--muted:#9aa1b5;--line:#2b3042;--brand:#8b7dff;--brand-t:#12141c;--me:#6a5cf0;--me-t:#fff;--bot:#262a3a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#12141c;--card:#1b1e29;--text:#e8eaf2;--muted:#9aa1b5;--line:#2b3042;--brand:#8b7dff;--brand-t:#12141c;--me:#6a5cf0;--me-t:#fff;--bot:#262a3a;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px);height:100%}
+*{box-sizing:border-box}
+body{margin:0;height:100%;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.app{max-width:760px;margin:0 auto;height:100%;display:flex;flex-direction:column;padding:12px}
+h1{font-size:20px;margin:4px 0 2px}
+.sub{color:var(--muted);font-size:14px;margin:0 0 10px}
+details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 12px;margin-bottom:10px}
+summary{cursor:pointer;font-weight:600;font-size:14px}
+textarea,input{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px}
+textarea{min-height:90px;resize:vertical;margin-top:8px}
+.chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px}
+.chip{flex:none;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:7px 14px;font:inherit;font-size:14px;cursor:pointer}
+.chip.on{background:var(--brand);color:var(--brand-t);border-color:var(--brand)}
+#log{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:6px 2px}
+.msg{max-width:88%;padding:10px 14px;border-radius:16px;white-space:pre-wrap;word-wrap:break-word}
+.me{align-self:flex-end;background:var(--me);color:var(--me-t);border-bottom-right-radius:4px}
+.bot{align-self:flex-start;background:var(--bot);border-bottom-left-radius:4px}
+.row{display:flex;gap:8px;padding-top:10px}
+.send{flex:none;border:0;background:var(--brand);color:var(--brand-t);border-radius:10px;padding:0 18px;font:inherit;font-weight:600;cursor:pointer}
+.send:disabled{opacity:.5;cursor:default}
+.hint{color:var(--muted);font-size:13px;text-align:center;margin:auto}
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>📚 AI Study Buddy</h1>
+  <p class="sub">Paste your notes, pick a mode, and study with a patient tutor.</p>
+  <details>
+    <summary>Your study notes (optional)</summary>
+    <textarea id="notes" placeholder="Paste notes or a topic here. The buddy will use them to explain, quiz and summarize."></textarea>
+  </details>
+  <div class="chips" id="chips"></div>
+  <div id="log"><p class="hint" id="hint">Ask a question, or tap a mode above and then send a topic.</p></div>
+  <div class="row">
+    <input id="inp" placeholder="Ask anything about what you’re studying…" autocomplete="off">
+    <button class="send" id="send">Send</button>
+  </div>
+</div>
+<script>
+const MODES={
+  explain:{label:"💡 Explain simply",rule:"Explain the topic in simple everyday language with one short analogy and one example. End with a one-line check question."},
+  quiz:{label:"❓ Quiz me",rule:"Quiz the student one question at a time. Ask a single question, wait for the answer, then say if it is right, explain briefly, and ask the next question. Raise the difficulty if they do well."},
+  summary:{label:"📝 Summarize",rule:"Summarize the notes or topic into 5 or fewer key points, then list 3 terms the student should memorize."},
+  plan:{label:"📅 Plan my study",rule:"Ask how many days and hours the student has if unknown, then give a short day-by-day study plan with revision slots."},
+  stuck:{label:"🧩 I’m stuck",rule:"The student is confused. Do not give the full answer at once. Give a hint, ask a guiding question, and let them try."}
+};
+let mode="explain",history=[],busy=false,sample=null;
+const $=id=>document.getElementById(id),log=$("log");
+function esc(s){return s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))}
+function fmt(s){return esc(s).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>")}
+$("chips").innerHTML=Object.entries(MODES).map(([k,m])=>`<button class="chip${k===mode?" on":""}" data-k="${k}">${m.label}</button>`).join("");
+$("chips").onclick=e=>{const k=e.target.dataset.k;if(!k)return;mode=k;
+  document.querySelectorAll(".chip").forEach(c=>c.classList.toggle("on",c.dataset.k===k));$("inp").focus()};
+function add(role,text){const h=$("hint");if(h)h.remove();const d=document.createElement("div");
+  d.className="msg "+role;d.innerHTML=fmt(text);log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
+function sys(){
+  const n=$("notes").value.trim();
+  return "You are Study Buddy, a warm, encouraging tutor for students. Keep replies short (under 150 words unless a plan is requested). Use plain text with **bold** for key terms only. Never invent facts; say so if unsure.\nCurrent mode: "+MODES[mode].rule+(n?"\nThe student’s notes:\n"+n.slice(0,6000):"\nThe student has not pasted notes.");
+}
+let demoN=0;
+function demo(q){
+  const t=q.length>60?q.slice(0,57)+"…":q;
+  const R={
+    explain:`**${t}**, in simple terms:\n\nThink of it like organizing a messy room: you group related things so they’re easy to find later. Start with the big idea, then add the details one by one.\n\n**Example:** pick one real situation where ${t} shows up and walk through it step by step.\n\nCheck question: can you explain ${t} back to me in one sentence?`,
+    quiz:[`**Question 1:** In your own words, what is the main purpose of ${t}?`,`Good effort! **Question 2:** Give one real example where ${t} applies, and say why.`,`Nice. **Question 3 (harder):** What would go wrong if ${t} was ignored or done incorrectly?`],
+    summary:`**Key points on ${t}:**\n1. What it is, in one sentence\n2. Why it matters\n3. How it works, step by step\n4. A common mistake to avoid\n5. One real-world example\n\n**Terms to memorize:** definition, process, example.`,
+    plan:`**3-day plan for ${t}:**\n\n**Day 1:** Learn the basics (45 min) + write a one-page summary.\n**Day 2:** Practice questions (45 min) + review mistakes.\n**Day 3:** Quick revision (30 min) + a self-quiz.\n\nTip: revise again 1 day and 1 week later so it sticks.`,
+    stuck:`No problem, let’s work through it together.\n\n**Hint:** start by writing down what you already know about ${t}. What is the very first step you’d take?\n\nTell me your answer and I’ll guide you to the next step.`
+  };
+  let r=R[mode];if(Array.isArray(r))r=r[demoN++%r.length];
+  const b=add("bot","");let i=0;
+  const tick=setInterval(()=>{i+=3;b.innerHTML=fmt(r.slice(0,i));log.scrollTop=log.scrollHeight;if(i>=r.length)clearInterval(tick)},15);
+  if(!document.getElementById("dm")){const n=document.createElement("p");n.id="dm";n.className="hint";n.textContent="Demo mode: sample answers. Open the claude.ai version for live AI.";log.appendChild(n)}
+}
+async function send(){
+  const q=$("inp").value.trim();if(!q||busy)return;
+  $("inp").value="";add("me",q);
+  if(!sample){demo(q);return}
+  history.push({role:"user",content:q});
+  const msgs=history.map(m=>({...m}));
+  msgs[0].content="[Instructions]\n"+sys()+"\n\n[Student]\n"+msgs[0].content;
+  if(msgs.length>1)msgs[msgs.length-1].content="[Mode: "+MODES[mode].label+" | "+MODES[mode].rule+"]\n"+msgs[msgs.length-1].content;
+  busy=true;$("send").disabled=true;const b=add("bot","…");
+  try{
+    const r=await sample(msgs,{cache:false,modelTier:"quick",onText:({text})=>{b.innerHTML=fmt(text);log.scrollTop=log.scrollHeight}});
+    b.innerHTML=fmt(r.text);history.push({role:"assistant",content:r.text});
+  }catch(e){
+    history.pop();
+    if(e&&e.code==="rate_limited"){b.textContent="Too many requests. Wait a moment and try again."}
+    else{b.remove();sample=null;demo(q)}
+  }
+  busy=false;$("send").disabled=false;$("inp").focus();
+}
+$("send").onclick=send;
+$("inp").addEventListener("keydown",e=>{if(e.key==="Enter")send()});
+(async()=>{try{sample=await claude.use("sample")}catch(e){sample=null}})();
+</script>
+</body>
+</html>
